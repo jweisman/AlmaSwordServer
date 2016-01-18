@@ -43,8 +43,14 @@ public class MediaResourceManagerImpl implements MediaResourceManager {
 	@Override
 	public void deleteMediaResource(String uri, AuthCredentials auth, SwordConfiguration config)
 			throws SwordError, SwordServerException, SwordAuthException {
-		// TODO Auto-generated method stub
 		
+		AlmaRepository alma = new AlmaRepository(auth);
+		String[] parts = SwordUtilities.getUrlParts(uri);
+		String depositId = parts[parts.length-2];
+		String fileId = parts[parts.length-1];
+		
+		alma.deleteFile(depositId, fileId);
+
 	}
 
 	@Override

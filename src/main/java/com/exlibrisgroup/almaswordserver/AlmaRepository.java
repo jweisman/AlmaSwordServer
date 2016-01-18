@@ -256,6 +256,11 @@ public class AlmaRepository {
 		
 	}
 	
+	public void deleteFile(String depositId, String fileId) {
+		Bib bib = getBib(depositId);
+		SwordUtilities.deleteFileFromS3(bib.getOrigId() + "/" + fileId);
+	}
+	
 	@SuppressWarnings("unchecked")
 	public List<DepositProfile> getDepositProfiles() {
 		

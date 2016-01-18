@@ -173,6 +173,14 @@ public class SwordUtilities {
     	return files;
     }
     
+    public static void deleteFileFromS3(String key) {
+        AmazonS3 s3 = new AmazonS3Client();
+    	s3.setRegion(_properties.getRegion());
+    	String bucketName = _properties.getBucket();
+    	String prefix = "" + _props.getProperty("prefix");
+    	s3.deleteObject(bucketName, prefix + key);
+    }
+    
     public static String getSignedUrl(String key) {
     	AmazonS3 s3 = new AmazonS3Client();
     	s3.setRegion(_properties.getRegion());
