@@ -13,7 +13,6 @@ import org.swordapp.server.SwordError;
 import org.swordapp.server.SwordServerException;
 
 import com.exlibrisgroup.almaswordserver.AlmaRepository.Bib;
-import com.exlibrisgroup.almaswordserver.AlmaRepository.Representation;
 
 public class ContainerManagerImpl implements ContainerManager {
 
@@ -56,10 +55,10 @@ public class ContainerManagerImpl implements ContainerManager {
 		String mmsId = SwordUtilities.getUrlPart(editIRI, -1);
 		
 		Bib bib = alma.getBib(mmsId);
-		Representation rep = alma.getRepresentation(bib.getOrigId());
+		com.exlibrisgroup.almaswordserver.AlmaRepository.Deposit dep = alma.getDeposit(bib.getOrigId());
 
 		DepositReceipt receipt = SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(editIRI), mmsId, 
-				bib.getDc(), rep.getFiles());
+				bib.getDc(), dep.getFiles());
 		return receipt;
 
 	}

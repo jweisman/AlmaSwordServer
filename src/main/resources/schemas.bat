@@ -1,0 +1,1 @@
+"%java_home%\bin\xjc" -d ../java -p com.exlibrisgroup.almarestmodels https://developers.exlibrisgroup.com/resources/xsd/rest_representation.xsd https://developers.exlibrisgroup.com/resources/xsd/rest_user.xsd

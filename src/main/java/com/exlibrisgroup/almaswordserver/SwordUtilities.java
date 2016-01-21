@@ -37,7 +37,6 @@ import com.amazonaws.services.s3.model.ListObjectsRequest;
 import com.amazonaws.services.s3.model.ObjectListing;
 import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
-import com.exlibrisgroup.almaswordserver.AlmaRepository.User;
 import com.exlibrisgroup.utilities.Util;
 
 public class SwordUtilities {
@@ -66,7 +65,7 @@ public class SwordUtilities {
     		} 
     	} else {
 	    	try {
-		    	User user = alma.getUser();
+		    	com.exlibrisgroup.almarestmodels.User user = alma.getUser();
 		    	if (user == null)
 		    		throw new SwordAuthException("'On-Behalf-Of' user does not exist");
 	    	} catch (NotAuthorizedException e) {

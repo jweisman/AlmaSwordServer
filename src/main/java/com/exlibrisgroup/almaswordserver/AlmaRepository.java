@@ -13,6 +13,7 @@ import java.util.Map;
 
 import javax.ws.rs.BadRequestException;
 import javax.ws.rs.NotAuthorizedException;
+import javax.xml.bind.JAXB;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.Transformer;
@@ -30,6 +31,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
+import com.exlibrisgroup.almarestmodels.*;
 import com.exlibrisgroup.almaswordserver.SwordUtilities.AlmaProperties;
 import com.exlibrisgroup.utilities.AlmaRestUtil;
 import com.exlibrisgroup.utilities.Util;
@@ -181,7 +183,7 @@ public class AlmaRepository {
 		return bib;
 	}
 	
-	public Representation getRepresentation(String pid) {
+	public Deposit getDeposit(String pid) {
 		ArrayList<String> keys = SwordUtilities.getFilesFromS3(pid);
 		ArrayList<String> files = new ArrayList<String>();
 		String filename = "";
@@ -190,71 +192,43 @@ public class AlmaRepository {
 			filename = parts[parts.length-1];
 			files.add(filename);
 		}
-		return new Representation(files);
+		return new Deposit(files);
 	}
 	
 	public String createRepresentation(String mmsId, String originatingRecord) {
 		
-		HashMap<String, String> library = new HashMap<String, String>();
-		library.put("value", "MAIN");
-		HashMap<String, String> usageType = new HashMap<String, String>();
-		usageType.put("value", "PRESERVATION_MASTER");
-		HashMap<String, String> repository = new HashMap<String, String>();
-		repository.put("value", "AWS");
-		
-		HashMap<String, Object> rep = new HashMap<String, Object>();
-		
-		rep.put("library", library);
-		rep.put("usage_type", usageType);
-		rep.put("repository", repository);
+		Representation rep = new Representation();
+		Representation.Library library = new Representation.Library();
+		library.setValue("MAIN");
+		Representation.UsageType usageType = new Representation.UsageType();
+		usageType.setValue("PRESERVATION_MASTER");
+		Representation.Repository repository = new Representation.Repository();
+		repository.setValue("AWS");
+		rep.setLibrary(library);
+		rep.setUsageType(usageType);
+		rep.setRepository(repository);
+
 		// Temporary for remote rep purposes
-		rep.put("linking_parameter_1", mmsId);
-		rep.put("is_remote", "true");
-		rep.put("originating_record_id", originatingRecord);
+		rep.setLinkingParameter1(mmsId);
+		rep.setIsRemote(true);
+		rep.setOriginatingRecordId(originatingRecord);
 		
-		Gson gson = new Gson();
-		String data = gson.toJson(rep);
+		StringWriter sw = new StringWriter();
+		JAXB.marshal(rep, sw);
 		
 		String resp = AlmaRestUtil.post(
 				_properties.getAlmaUrl(), 
 				"bibs/" + mmsId + "/representations",
 				_authCredentials.getPassword(), 
-				data
+				null,
+				sw.toString(), 
+				true
 			);
 
-		Type obj = new TypeToken<Map<String, Object>>(){}.getType();
-		Map<String, Object> map = gson.fromJson(resp, obj);
-		return (String) map.get("id");
+    	rep = JAXB.unmarshal(new StringReader(resp), Representation.class);
+    	return rep.getId();
 	}
 	
-	public String createDeposit(String mmsId, String repId) {
-
-		// TODO: Work with deposit API
-		HashMap<String, Object> deposit = new HashMap<String, Object>();
-		deposit.put("type", "DIGITIZATION");
-		deposit.put("target_destination", "DIGI_DEPT_INST");
-		deposit.put("partial_digitization", "false");
-		deposit.put("comment", repId);
-		
-		Gson gson = new Gson();
-		String data = gson.toJson(deposit);
-		
-    	HashMap<String, String> params = new HashMap<String, String>();
-    	params.put("mms_id", mmsId);
-		
-		String resp = AlmaRestUtil.post(
-				_properties.getAlmaUrl(), 
-				"users/" + _authCredentials.getOnBehalfOf() + "/requests",
-				_authCredentials.getPassword(), 
-				params,
-				data
-			);
-
-		Type obj = new TypeToken<Map<String, Object>>(){}.getType();
-		Map<String, Object> map = gson.fromJson(resp, obj);
-		return (String) map.get("id");
-		
-	}
 	
 	public void deleteFile(String depositId, String fileId) {
 		Bib bib = getBib(depositId);
@@ -318,10 +292,9 @@ public class AlmaRepository {
 		return getUser(_authCredentials.getOnBehalfOf());
 	}
 	
-	@SuppressWarnings("unchecked")
 	public User getUser(String userId) {
 
-		User user = null;
+		com.exlibrisgroup.almarestmodels.User user = null;
 		try {
     		
 			Map<String, String> params = new HashMap<String, String>();
@@ -329,22 +302,13 @@ public class AlmaRepository {
 	    	String resp = AlmaRestUtil.get(
 	    			_properties.getAlmaUrl(), 
 	    			"users/" + _authCredentials.getOnBehalfOf(), 
-	    			_authCredentials.getPassword(), params);
+	    			_authCredentials.getPassword(), 
+	    			params,
+	    			true);	
+
+	    	user = JAXB.unmarshal(new StringReader(resp), User.class);
 	    	
-			Gson gson = new Gson();
-			Type obj = new TypeToken<Map<String, Object>>(){}.getType();
-			Map<String, Object> map = gson.fromJson(resp, obj);
-	    	Map<String, Object> group = (Map<String, Object>) map.get("user_group");
-	    	user = new User(
-	    			(String) map.get("primary_id"),
-	    			(String) group.get("value"),
-	    			(String) group.get("desc"),
-	    			(String) map.get("first_name"),
-	    			(String) map.get("last_name")
-    			);
-	    	
-	    	
-	    	log.info("Found user: " + user.getUserId());
+	    	log.info("Found user: " + user.getPrimaryId());
     	} 
     	catch (BadRequestException e) 
     	{
@@ -353,10 +317,9 @@ public class AlmaRepository {
     			throw new NotAuthorizedException("API Key is not valid");
     		else
     			return null;
-    	}
+    	} 
 		
 		return user;
-
 	}
 	
 	/*******************
@@ -392,45 +355,6 @@ public class AlmaRepository {
 		public String getName() {
 			return _name;
 		}
-	}
-	
-	class User {
-		String _userId;
-		String _userGroupId;
-		String _userGroupName;
-		String _firstName;
-		String _lastName;
-		
-		public User(String userId, String userGroupId,
-				String userGroupName, String firstName, String lastName) {
-
-			_userId = userId;
-			_userGroupId = userGroupId;
-			_userGroupName = userGroupName;
-			_firstName = firstName;
-			_lastName = lastName;
-		}
-		
-		public String getUserId() {
-			return _userId;
-		}
-		
-		public String getUserGroupId() {
-			return _userGroupId;
-		}
-		
-		public String getUserGroupName() {
-			return _userGroupName;
-		}
-		
-		public String getFirstName() {
-			return _firstName;
-		}
-		
-		public String getLastName() {
-			return _lastName;
-		}
-		
 	}
 	
 	class DCEntity {
@@ -477,10 +401,10 @@ public class AlmaRepository {
 		}
 	}
 	
-	class Representation {
+	class Deposit {
 		private ArrayList<String> _files;
 		
-		public Representation(ArrayList<String> files) {
+		public Deposit(ArrayList<String> files) {
 			_files = files;
 		}
 		
