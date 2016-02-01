@@ -1,1 +1,3 @@
-"%java_home%\bin\xjc" -d ../java -p com.exlibrisgroup.almarestmodels https://developers.exlibrisgroup.com/resources/xsd/rest_representation.xsd https://developers.exlibrisgroup.com/resources/xsd/rest_user.xsd
+"%java_home%\bin\xjc" -d ../java -p com.exlibrisgroup.almarestmodels.representation https://developers.exlibrisgroup.com/resources/xsd/rest_representation.xsd 
+"%java_home%\bin\xjc" -d ../java -p com.exlibrisgroup.almarestmodels.user https://developers.exlibrisgroup.com/resources/xsd/rest_user.xsd 
+"%java_home%\bin\xjc" -d ../java -p com.exlibrisgroup.almarestmodels.vendor https://developers.exlibrisgroup.com/resources/xsd/rest_vendor.xsd

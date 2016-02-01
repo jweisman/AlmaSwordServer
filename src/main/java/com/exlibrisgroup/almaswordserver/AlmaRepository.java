@@ -31,7 +31,8 @@ import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
-import com.exlibrisgroup.almarestmodels.*;
+import com.exlibrisgroup.almarestmodels.representation.Representation;
+import com.exlibrisgroup.almarestmodels.user.User;
 import com.exlibrisgroup.almaswordserver.SwordUtilities.AlmaProperties;
 import com.exlibrisgroup.utilities.AlmaRestUtil;
 import com.exlibrisgroup.utilities.Util;
@@ -53,7 +54,7 @@ public class AlmaRepository {
     	_authCredentials = authCredentials;
     }
     
-	public String createBib(SwordEntry entry, String origId) {
+	public String createBib(SwordEntry entry, String origId) throws Exception {
 
 		String xml = 
 		"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" + 
@@ -88,6 +89,10 @@ public class AlmaRepository {
 			);
 		
 		String mms_id = Util.find(resp, "<mms_id>(\\d*)<\\/mms_id>");
+		if (mms_id == "") {
+			log.error("BIB could not be created: " + resp);
+			throw new Exception("Could not create BIB");
+		}
 		log.info("BIB Created: " + mms_id);
 		return mms_id;
 	}
@@ -294,7 +299,7 @@ public class AlmaRepository {
 	
 	public User getUser(String userId) {
 
-		com.exlibrisgroup.almarestmodels.User user = null;
+		User user = null;
 		try {
     		
 			Map<String, String> params = new HashMap<String, String>();
