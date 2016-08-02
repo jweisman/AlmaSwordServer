@@ -11,7 +11,9 @@ import org.swordapp.server.SwordAuthException;
 import org.swordapp.server.SwordConfiguration;
 import org.swordapp.server.SwordError;
 import org.swordapp.server.SwordServerException;
+import org.swordapp.server.UriRegistry;
 
+import com.exlibrisgroup.almarestmodels.userdeposits.UserDeposit;
 import com.exlibrisgroup.almaswordserver.AlmaRepository.Bib;
 
 public class ContainerManagerImpl implements ContainerManager {
@@ -40,7 +42,18 @@ public class ContainerManagerImpl implements ContainerManager {
 	@Override
 	public void deleteContainer(String editIRI, AuthCredentials auth, SwordConfiguration config)
 			throws SwordError, SwordServerException, SwordAuthException {
-		// TODO Auto-generated method stub
+		
+		SwordUtilities.Authenticate(auth);
+		
+		AlmaRepository alma = new AlmaRepository(auth);
+		String depositId = SwordUtilities.getUrlPart(editIRI, -1);
+		
+		UserDeposit userDeposit = alma.getDeposit(auth.getOnBehalfOf(), depositId);
+		
+		if (!allowEdit(userDeposit.getStatus()))
+			throw new SwordError(UriRegistry.ERROR_BAD_REQUEST, "Deposit not in valid status for update.");
+
+		alma.withdrawDeposit(auth.getOnBehalfOf(), depositId);
 		
 	}
 
@@ -52,13 +65,14 @@ public class ContainerManagerImpl implements ContainerManager {
 		SwordUtilities.Authenticate(auth);
 		
 		AlmaRepository alma = new AlmaRepository(auth);
-		String mmsId = SwordUtilities.getUrlPart(editIRI, -1);
+		String depositId = SwordUtilities.getUrlPart(editIRI, -1);
 		
+		UserDeposit userDeposit = alma.getDeposit(auth.getOnBehalfOf(), depositId);
+		String mmsId = userDeposit.getMmsId();
 		Bib bib = alma.getBib(mmsId);
-		com.exlibrisgroup.almaswordserver.AlmaRepository.Deposit dep = alma.getDeposit(bib.getOrigId());
 
-		DepositReceipt receipt = SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(editIRI), mmsId, 
-				bib.getDc(), dep.getFiles());
+		DepositReceipt receipt = SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(editIRI), 
+				userDeposit, bib.getDc(), alma.getDepositFiles(userDeposit));
 		return receipt;
 
 	}
@@ -78,13 +92,22 @@ public class ContainerManagerImpl implements ContainerManager {
 		SwordUtilities.Authenticate(auth);
 		
 		AlmaRepository alma = new AlmaRepository(auth);
-		String mmsId = SwordUtilities.getUrlPart(editIRI, -1);
+		String depositId = SwordUtilities.getUrlPart(editIRI, -1);
 		
-		alma.updateBib(mmsId, deposit.getSwordEntry().getDublinCore());
+		UserDeposit userDeposit = alma.getDeposit(auth.getOnBehalfOf(), depositId);
+		
+		if (!allowEdit(userDeposit.getStatus()))
+			throw new SwordError(UriRegistry.ERROR_BAD_REQUEST, "Deposit not in valid status for update.");
 
-		return SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(editIRI), mmsId, 
-				deposit.getSwordEntry().getDublinCore(), new ArrayList<String>());
-	
+		alma.updateBib(userDeposit.getMmsId(), deposit.getSwordEntry().getDublinCore());
+		
+		if (!deposit.isInProgress()) {
+			alma.submitDeposit(auth.getOnBehalfOf(), depositId);
+		}
+
+		return SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(editIRI), userDeposit, 
+				deposit.getSwordEntry().getDublinCore(), alma.getDepositFiles(userDeposit));
+
 	}
 
 	@Override
@@ -101,4 +124,10 @@ public class ContainerManagerImpl implements ContainerManager {
 		return null;
 	}
 
+	private boolean allowEdit(String status) {
+		ArrayList<String> allowedStatuses = new ArrayList<String>();
+		allowedStatuses.add("RETURNED");
+		allowedStatuses.add("DRAFT");
+		return allowedStatuses.contains(status);
+	}
 }

@@ -16,11 +16,11 @@ public class AlmaRestUtil {
     // private static Logger log = Logger.getLogger(AlmaRestUtil.class);
 	
 	public static String get(String server, String path, String apikey) {
-		return get(server, path, apikey, null, false);
+		return get(server, path, apikey, null, true);
 	}
     
 	public static String get(String server, String path, String apikey, Map<String, String> params) {
-		return get(server, path, apikey, params, false);
+		return get(server, path, apikey, params, true);
 	}
 	
     public static String get(String server, String path, String apikey, Map<String, String> params, boolean xml) {
@@ -57,11 +57,11 @@ public class AlmaRestUtil {
     
     public static String post(String server, String path, String apikey, Map<String, String> params, 
     		String data) {
-    	return post(server, path, apikey, params, data, false);
+    	return post(server, path, apikey, params, data, true);
     }
     
     public static String post(String server, String path, String apikey, String data) {
-    	return post(server, path, apikey, null, data, false);
+    	return post(server, path, apikey, null, data, true);
     }
     
     public static String put(String server, String path, String apikey, Map<String, String> params, 
@@ -86,14 +86,26 @@ public class AlmaRestUtil {
     
     public static String put(String server, String path, String apikey, Map<String, String> params, 
     		String data) {
-    	return post(server, path, apikey, params, data, false);
+    	return put(server, path, apikey, params, data, true);
     }
     
     public static String put(String server, String path, String apikey, String data) {
-    	return post(server, path, apikey, null, data, false);
+    	return put(server, path, apikey, null, data, true);
     }    
     
+    public static void delete (String server, String path, String apikey) {
+    	delete(server, path, apikey, true);
+    }
     
+    public static void delete(String server, String path, String apikey, boolean xml) {
+    	Client client = ClientBuilder.newBuilder()
+    			.register(JacksonFeature.class)
+    			.build();
+    	WebTarget target = client.target(server).path(path);
+    	target.request(xml ? MediaType.APPLICATION_XML : MediaType.APPLICATION_JSON)
+    			.header("Authorization", "apikey " + apikey)
+    			.delete(); 
+    }
     
     private static WebTarget addParams(WebTarget target, Map<String, String> params) {
     	if (params == null) return target;

@@ -28,6 +28,7 @@ import org.swordapp.server.SwordError;
 import org.swordapp.server.UriRegistry;
 
 import com.amazonaws.HttpMethod;
+import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.AmazonS3;
@@ -38,6 +39,7 @@ import com.amazonaws.services.s3.model.ObjectListing;
 import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.exlibrisgroup.almarestmodels.user.User;
+import com.exlibrisgroup.almarestmodels.userdeposits.UserDeposit;
 import com.exlibrisgroup.utilities.Util;
 
 public class SwordUtilities {
@@ -52,11 +54,12 @@ public class SwordUtilities {
     	Authenticate(authCredentials, false);
     }
 
-    public static void Authenticate(AuthCredentials authCredentials, Boolean allowAnonymous) 
+    public static User Authenticate(AuthCredentials authCredentials, Boolean allowAnonymous) 
     		throws SwordAuthException {
 
     	AlmaRepository alma = new AlmaRepository(authCredentials);
-
+    	User user = null;
+    	
     	if (authCredentials.getOnBehalfOf() == null) {
     		if (!allowAnonymous) {
     			throw new SwordAuthException("On-Behalf-Of user is is required.");
@@ -66,19 +69,21 @@ public class SwordUtilities {
     		} 
     	} else {
 	    	try {
-		    	User user = alma.getUser();
+		    	user = alma.getUser();
 		    	if (user == null)
 		    		throw new SwordAuthException("'On-Behalf-Of' user does not exist");
 	    	} catch (NotAuthorizedException e) {
 	    		throw new SwordAuthException("API Key is not valid");
 	    	}
     	}
+    	return user;
     }
     
-    public static DepositReceipt getDepositReceipt(String rootUri, String depositId, 
+    public static DepositReceipt getDepositReceipt(String rootUri, UserDeposit deposit, 
     		Map<String, List<String>> dc, List<String> files) {
     	DepositReceipt receipt = new DepositReceipt();
     	
+    	String depositId = deposit.getDepositId();
     	if (dc != null) {
 	    	for (Map.Entry<String, List<String>> entry : dc.entrySet() ) {
 	    		for (String value : entry.getValue()) { 
@@ -92,7 +97,13 @@ public class SwordUtilities {
         receipt.setEditIRI(iri);
         iri = new IRI(rootUri + "/edit-media/" + depositId);
         receipt.setEditMediaIRI(iri);
-        receipt.setVerboseDescription(depositId);
+        receipt.setId(depositId);
+        receipt.getWrappedEntry().setTitle(deposit.getTitle());
+        receipt.getWrappedEntry().setUpdated(deposit.getModificationDate().toGregorianCalendar().getTime());
+        receipt.setTreatment(deposit.getStatus());
+        if (deposit.getNotes() != null && deposit.getNotes().getNote().size() > 0) 
+        	receipt.getWrappedEntry().setSummary(deposit.getNotes().getNote().get(deposit.getNotes().getNote().size()-1).getContent());
+        receipt.setSplashUri(deposit.getDeliveryUrl());
         for (String file : files) {
         	String filename = null;
         	try {
@@ -108,23 +119,25 @@ public class SwordUtilities {
         return receipt;
     }
     
-    private static void writeFileToS3(Path path, String folder) {
-        AmazonS3 s3 = new AmazonS3Client();
+    private static String writeFileToS3(Path path, String folder) {
+    	AmazonS3 s3 = new AmazonS3Client();
     	s3.setRegion(_properties.getRegion());
     	String bucketName = _properties.getBucket();
     	String prefix = "" + _props.getProperty("prefix");
     	String key = prefix + folder + "/" + path.getFileName();
-    	s3.putObject(new PutObjectRequest(bucketName, key, path.toFile()));    	
+    	log.info("Writing object to AWS: " + key);
+    	s3.putObject(new PutObjectRequest(bucketName, key, path.toFile()));    
+    	return key;
     }
     
-    public static List<String> uploadDepositedFiles(File file, boolean zip, String filename) {
+    public static ArrayList<String> uploadDepositedFiles(File file, boolean zip, String filename) {
         Path path = Paths.get(file.getParent());
 
     	return uploadDepositedFiles(file, zip, filename, path.getFileName().toString());
     }
     
-    public static List<String> uploadDepositedFiles(File file, boolean zip, String filename, String folder) {
-    	List<String> fileList = new ArrayList<String>();
+    public static ArrayList<String> uploadDepositedFiles(File file, boolean zip, String filename, String folder) {
+    	ArrayList<String> fileList = new ArrayList<String>();
     	
     	try {
 	        Path path = Paths.get(file.getParent());
@@ -143,10 +156,10 @@ public class SwordUtilities {
 	        Files.walk(path).forEach( filePath -> {
 	        	if (!Files.isDirectory(filePath)) {
 		        	log.info("Uploading file: " + filePath);
-		        	writeFileToS3(filePath, folder);
+		        	String key = writeFileToS3(filePath, folder);
 		        	
 		        	// Add file to list of files
-		        	fileList.add(filePath.getFileName().toString());
+		        	fileList.add(key);
 	        	}
 	        });
 	        
@@ -296,7 +309,12 @@ public class SwordUtilities {
     		properties.setAlmaUrl("https://api-na.hosted.exlibrisgroup.com/almaws/v1");    		
     		properties.setBucket("almad-test");
     		properties.setRegion(Region.getRegion(Regions.US_EAST_1));
-    		break;    		
+    		break;
+    	case "na-test":
+    		properties.setAlmaUrl("https://api-na.hosted.exlibrisgroup.com/almaws/v1");    		
+    		properties.setBucket("na-test-st01.ext.exlibrisgroup.com");
+    		properties.setRegion(Region.getRegion(Regions.US_EAST_1));
+    		break;
     	default:
     		properties.setAlmaUrl("https://api-na.hosted.exlibrisgroup.com/almaws/v1");
     		properties.setBucket("na-st01.ext.exlibrisgroup.com");

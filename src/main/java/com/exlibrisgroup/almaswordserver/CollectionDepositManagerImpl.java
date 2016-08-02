@@ -1,9 +1,7 @@
 package com.exlibrisgroup.almaswordserver;
 
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 
 import org.apache.log4j.Logger;
 import org.swordapp.server.AuthCredentials;
@@ -15,6 +13,10 @@ import org.swordapp.server.SwordConfiguration;
 import org.swordapp.server.SwordError;
 import org.swordapp.server.SwordServerException;
 import org.swordapp.server.UriRegistry;
+
+import com.exlibrisgroup.almarestmodels.depositprofiles.DepositProfile;
+import com.exlibrisgroup.almarestmodels.representations.Representation;
+import com.exlibrisgroup.almarestmodels.userdeposits.UserDeposit;
 
 public class CollectionDepositManagerImpl implements CollectionDepositManager {
 	
@@ -30,8 +32,8 @@ public class CollectionDepositManagerImpl implements CollectionDepositManager {
     	SwordUtilities.Authenticate(authCredentials);
     	timer.put("Authenticate", System.nanoTime());
     	
-    	String depositId = null;
-    	List<String> fileList = new ArrayList<String>();
+    	UserDeposit userDeposit = null;
+    	ArrayList<String> fileList = new ArrayList<String>();
     	
     	// Implement metadata only or file only, eventually
     	if (deposit.getSwordEntry() == null || deposit.getFile() == null) {
@@ -43,19 +45,21 @@ public class CollectionDepositManagerImpl implements CollectionDepositManager {
     		
     		AlmaRepository alma = new AlmaRepository(authCredentials);
 
-    		// TODO: Remove original ID
-    		String origId = Paths.get(deposit.getFile().getParent()).getFileName().toString();
-
     		// Create BIB
-    		String mmsId = alma.createBib(deposit.getSwordEntry(), origId);
-    		depositId = mmsId;
+    		String mmsId = alma.createBib(deposit.getSwordEntry());
         	timer.put("Create BIB", System.nanoTime());
         	
+        	// Get deposit profile information
+        	String depositProfileId = collectionUri.substring(collectionUri.lastIndexOf('/') + 1);
+        	DepositProfile depositProfile = alma.getDepositProfile(depositProfileId);
+        	
     		// Add BIB to Collection
-    		// TODO: Add BIB to Collection
+        	alma.addBibToCollection(mmsId, depositProfile.getCollectionAssignment().getValue());
+        	timer.put("Add BIB to collection", System.nanoTime());
     		
     		// Create representation
-    		String repId = alma.createRepresentation(mmsId, origId);
+        	Representation rep = alma.createRepresentation(mmsId, depositProfile.getLibrary().getValue());
+        	String repId = rep.getId();
         	timer.put("Create Rep", System.nanoTime());
     		log.info("Created representation: " + repId);
     		
@@ -65,16 +69,28 @@ public class CollectionDepositManagerImpl implements CollectionDepositManager {
         			deposit.getPackaging().equals(UriRegistry.PACKAGE_SIMPLE_ZIP),
         			deposit.getFilename()
         			);
-        	
-        	// TODO: Add file to representation
-        	
+
 	    	timer.put("Upload Files", System.nanoTime());
+        	
+        	// Add files to representation
+        	for (String file : fileList) {
+        		alma.addFileToRepresentation(mmsId, repId, file);
+        		log.info("Added file to rep: " + file);
+        	}
+        	
+	    	timer.put("Add files to rep", System.nanoTime());
 	    	
 	        // Add deposit for user
-	        // TODO: create deposit
-	        // String depositId = alma.createDeposit(mmsId, repId);
-	        
-
+	    	String title;
+	    	if (deposit.getSwordEntry().getTitle() != null)
+	    		title = deposit.getSwordEntry().getTitle();
+	    	else
+	    		title = deposit.getSwordEntry().getDublinCore().get("title").get(0);
+	    	
+	        userDeposit = alma.createDeposit(depositProfileId, mmsId, repId,
+	        		title, deposit.isInProgress(), authCredentials.getOnBehalfOf());
+	        log.info("Created deposit: " + userDeposit.getDepositId());
+	        	        
         } catch (Exception e) {
         	log.error(e.getMessage());
 			throw new SwordServerException(e);
@@ -82,9 +98,8 @@ public class CollectionDepositManagerImpl implements CollectionDepositManager {
 
     	// Log times
     	log.info(SwordUtilities.getTimingString(timer));
-    	
-        return SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(collectionUri), depositId, 
-        		deposit.getSwordEntry().getDublinCore(), fileList);
+        return SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(collectionUri), 
+        		userDeposit, deposit.getSwordEntry().getDublinCore(), fileList);
        
     }
     

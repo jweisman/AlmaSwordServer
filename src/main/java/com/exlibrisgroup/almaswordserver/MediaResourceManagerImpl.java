@@ -1,8 +1,9 @@
 package com.exlibrisgroup.almaswordserver;
 
-import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 
+import org.apache.log4j.Logger;
 import org.swordapp.server.AuthCredentials;
 import org.swordapp.server.Deposit;
 import org.swordapp.server.DepositReceipt;
@@ -14,30 +15,37 @@ import org.swordapp.server.SwordError;
 import org.swordapp.server.SwordServerException;
 import org.swordapp.server.UriRegistry;
 
-import com.exlibrisgroup.almaswordserver.AlmaRepository.Bib;
+import com.exlibrisgroup.almarestmodels.userdeposits.UserDeposit;
 
 public class MediaResourceManagerImpl implements MediaResourceManager {
 	
+    private static Logger log = Logger.getLogger(MediaResourceManager.class);
+
 	@Override
 	public DepositReceipt addResource(String uri, Deposit deposit, AuthCredentials auth, SwordConfiguration config)
 			throws SwordError, SwordServerException, SwordAuthException {
 
 		AlmaRepository alma = new AlmaRepository(auth);
 		String depositId = SwordUtilities.getUrlPart(uri, -1);
-		Bib bib = alma.getBib(depositId);
-    	List<String> fileList = SwordUtilities.uploadDepositedFiles(
+		UserDeposit userDeposit = alma.getDeposit(auth.getOnBehalfOf(), depositId);
+
+    	ArrayList<String> fileList = SwordUtilities.uploadDepositedFiles(
     			deposit.getFile(),
     			deposit.getPackaging().equals(UriRegistry.PACKAGE_SIMPLE_ZIP),
-    			deposit.getFilename(),
-    			bib.getOrigId()
+    			deposit.getFilename()
     			);
     	
-    	// TODO: Add file to representation
+    	// Add files to representation
+    	for (String file : fileList) {
+    		alma.addFileToRepresentation(userDeposit.getMmsId(), 
+    				userDeposit.getRepId(), 
+    				file);
+    		log.info("Added file to rep: " + file);
+    	}
 
     	
-        return SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(uri), depositId, 
+        return SwordUtilities.getDepositReceipt(SwordUtilities.getBaseUrl(uri), userDeposit, 
         		null, fileList);
-	        
 	}
 
 	@Override
@@ -47,9 +55,9 @@ public class MediaResourceManagerImpl implements MediaResourceManager {
 		AlmaRepository alma = new AlmaRepository(auth);
 		String[] parts = SwordUtilities.getUrlParts(uri);
 		String depositId = parts[parts.length-2];
-		String fileId = parts[parts.length-1];
+		String fileName = parts[parts.length-1];
 		
-		alma.deleteFile(depositId, fileId);
+		alma.deleteFile(auth.getOnBehalfOf(), depositId, fileName);
 
 	}
 

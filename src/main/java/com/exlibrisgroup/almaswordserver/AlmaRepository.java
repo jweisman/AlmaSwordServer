@@ -2,7 +2,6 @@ package com.exlibrisgroup.almaswordserver;
 
 import java.io.StringReader;
 import java.io.StringWriter;
-import java.lang.reflect.Type;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -14,7 +13,6 @@ import java.util.Map;
 import javax.ws.rs.BadRequestException;
 import javax.ws.rs.NotAuthorizedException;
 import javax.xml.bind.JAXB;
-import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
@@ -28,16 +26,22 @@ import org.apache.log4j.Logger;
 import org.swordapp.server.AuthCredentials;
 import org.swordapp.server.SwordEntry;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
-import com.exlibrisgroup.almarestmodels.representation.Representation;
+import com.exlibrisgroup.almarestmodels.depositprofiles.DepositProfile;
+import com.exlibrisgroup.almarestmodels.depositprofiles.DepositProfiles;
+import com.exlibrisgroup.almarestmodels.representationfiles.RepresentationFile;
+import com.exlibrisgroup.almarestmodels.representationfiles.RepresentationFiles;
+import com.exlibrisgroup.almarestmodels.representations.Representation;
+import com.exlibrisgroup.almarestmodels.representations.Representations;
 import com.exlibrisgroup.almarestmodels.user.User;
+import com.exlibrisgroup.almarestmodels.userdeposits.UserDeposit;
 import com.exlibrisgroup.almaswordserver.SwordUtilities.AlmaProperties;
 import com.exlibrisgroup.utilities.AlmaRestUtil;
 import com.exlibrisgroup.utilities.Util;
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 
 public class AlmaRepository {
 	
@@ -54,39 +58,28 @@ public class AlmaRepository {
     	_authCredentials = authCredentials;
     }
     
-	public String createBib(SwordEntry entry, String origId) throws Exception {
+	/*******************
+	 * BIB
+	********************/
+    
+	public String createBib(SwordEntry entry) throws Exception {
 
 		String xml = 
-		"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" + 
-		"<bib>" +
-		"	<mms_id></mms_id>" +
-		"	<suppress_from_publishing>true</suppress_from_publishing>" +
-		"	<record>" +
-	    "        <leader>     aas          a     </leader>" +
-	    "        <controlfield tag=\"008\">       " + new SimpleDateFormat("yyyy").format(new Date()) + "</controlfield>" +
-	    "        <datafield tag=\"035\" ind1=\" \" ind2=\" \">" +
-	    "          <subfield code=\"a\">(SWORD)" + origId + "</subfield>" +
-	    "        </datafield>" +	    
-	    "        <datafield tag=\"100\" ind1=\"1\" ind2=\" \">" +
-	    "          <subfield code=\"a\">" + entry.getDublinCore().get("creator").get(0) + "</subfield>" +
-	    "        </datafield>" +
-	    "        <datafield tag=\"245\" ind1=\"1\" ind2=\"2\">" +
-	    "          <subfield code=\"a\">" + entry.getDublinCore().get("title").get(0) + "</subfield>" +
-	    "        </datafield>" +
-	    "        <datafield tag=\"260\" ind1=\" \" ind2=\" \">" +
-	    "          <subfield code=\"c\">" + new SimpleDateFormat("MMMM d, yyyy").format(new Date()) + "</subfield>" +
-	    "        </datafield>" +
-	    "	</record>" +
-		"</bib>";
+			"<bib>" + 
+			"<suppress_from_publishing>true</suppress_from_publishing>" +
+			"<record_format>dc</record_format>" +
+			"   <record xmlns:dc=\"http://purl.org/dc/elements/1.1/\">" +
+			"      <dc:date>" + new SimpleDateFormat("yyyy-MM-dd").format(new Date()) + "</dc:date>";
 		
-		String resp = AlmaRestUtil.post(
-				_properties.getAlmaUrl(), 
-				"bibs", 
-				_authCredentials.getPassword(),
-				null,
-				xml,
-				true
-			);
+		for (Map.Entry<String, List<String>> key : entry.getDublinCore().entrySet()) {
+			for (String val : key.getValue()) {
+				xml += "<dc:" + key.getKey() + ">" + val + "</dc:" + key.getKey() + ">";
+			}
+		}
+		
+		xml += "</record></bib>";
+		
+		String resp = almaPost("bibs", xml);
 		
 		String mms_id = Util.find(resp, "<mms_id>(\\d*)<\\/mms_id>");
 		if (mms_id == "") {
@@ -99,15 +92,7 @@ public class AlmaRepository {
 	
 	public void updateBib(String mmsId, Map<String, List<String>> dc) {
 
-		String resp = AlmaRestUtil.get(
-				_properties.getAlmaUrl(), 
-				"bibs/" + mmsId, 
-				_authCredentials.getPassword(),
-				null,
-				true
-			);
-		
-		// TODO: Replace with DC handling
+		String resp = almaGet("bibs/" + mmsId);
 		
 		try {
 		
@@ -118,29 +103,32 @@ public class AlmaRepository {
 					.parse(source);
 	
 			XPath xpath = XPathFactory.newInstance().newXPath();
+
+			// Get "record" node
+			Node record = (Node) xpath.evaluate("/bib/record", 
+					document, XPathConstants.NODE);
 			
-			NodeList creator = (NodeList) xpath.evaluate("/bib/record/datafield[@tag='100']/subfield[@code='a']", 
-					document, XPathConstants.NODESET);
-			
-			NodeList title = (NodeList) xpath.evaluate("/bib/record/datafield[@tag='245']/subfield[@code='a']", 
-					document, XPathConstants.NODESET);
-	
-			creator.item(0).setTextContent(dc.get("creator").get(0));
-			title.item(0).setTextContent(dc.get("title").get(0));
-			
+			// For each received field, remove from source and replace with received fields
+			for (String fieldName : dc.keySet()) {
+				NodeList fields = (NodeList) xpath.evaluate("/bib/record/" + fieldName, 
+						document, XPathConstants.NODESET);
+				for (int i = 0; i < fields.getLength(); i++) {
+					fields.item(i).getParentNode().removeChild(fields.item(i));
+				}
+
+				for (String val : dc.get(fieldName)) {
+					Element field = document.createElement("dc:" + fieldName);
+					field.appendChild(document.createTextNode(val));
+					record.appendChild(field);
+				}
+			}
+
 			Transformer transformer = TransformerFactory.newInstance().newTransformer();
 			StringWriter sw = new StringWriter();
 			
 			transformer.transform(new DOMSource(document), new StreamResult(sw));
-			
-			AlmaRestUtil.put(
-					_properties.getAlmaUrl(), 
-					"bibs/" + mmsId, 
-					_authCredentials.getPassword(),
-					null,
-					sw.getBuffer().toString(),
-					true
-				);
+			String bib = sw.toString();
+			almaPut("bibs/" + mmsId, bib);
 			
 		} catch (Exception e) {
 			log.error(e.getMessage(), e);
@@ -150,143 +138,227 @@ public class AlmaRepository {
 	
 	public Bib getBib(String mmsId) {
 		
-		String resp = AlmaRestUtil.get(
-				_properties.getAlmaUrl(), 
-				"bibs/" + mmsId, 
-				_authCredentials.getPassword(),
-				null,
-				true
-			);
+		String resp = almaGet("bibs/" + mmsId);
 		
 		Map<String, List<String>> dc = new HashMap<String, List<String>>();
-		String origId = "";
 		
 		try {
-			// TODO: Replace with DC handling
 			InputSource source = new InputSource(new StringReader(resp));
 	
-			DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-			DocumentBuilder db = dbf.newDocumentBuilder();
-			Document document = db.parse(source);
+			Document document= DocumentBuilderFactory.newInstance()
+					.newDocumentBuilder()
+					.parse(source);
 	
-			XPathFactory xpathFactory = XPathFactory.newInstance();
-			XPath xpath = xpathFactory.newXPath();
-	
-			String creator = xpath.evaluate("/bib/record/datafield[@tag='100']/subfield[@code='a']", document);
-			String title = xpath.evaluate("/bib/record/datafield[@tag='245']/subfield[@code='a']", document);
-			origId = xpath.evaluate("/bib/record/datafield[@tag='035']/subfield[@code='a']", document);
-			origId = origId.substring(origId.indexOf("(SWORD)") + 7);
-	
-			dc.put("creator", Arrays.asList(creator));
-			dc.put("title", Arrays.asList(title));
+			XPath xpath = XPathFactory.newInstance().newXPath();
+
+			Node fields = (Node) xpath.evaluate("/bib/record", 
+					document, XPathConstants.NODE);
+			
+			// Add all fields to DC array
+			for (int i = 0; i < fields.getChildNodes().getLength(); i++) {
+				Node field = fields.getChildNodes().item(i);
+				String fieldName = field.getNodeName().replace("dc:", "");
+				if (dc.containsKey(fieldName)) {
+					ArrayList<String> values = new ArrayList<String>(dc.get(fieldName));
+					values.add(field.getTextContent());
+					dc.put(fieldName, values);
+				}
+				else
+					dc.put(fieldName, Arrays.asList(field.getTextContent()));
+			}
 			
 		} catch (Exception e) {
 			log.error(e.getMessage());
 		}
 		
-		Bib bib = new Bib(mmsId, dc, origId);
+		Bib bib = new Bib(mmsId, dc);
 		return bib;
 	}
 	
-	public Deposit getDeposit(String pid) {
-		ArrayList<String> keys = SwordUtilities.getFilesFromS3(pid);
+	public void addBibToCollection(String mmsId, String collectionId) {
+		almaPost("bibs/collections/" + collectionId + "/bibs",
+				"<bib><mms_id>" + mmsId + "</mms_id></bib>");
+		
+	}
+	
+	/*******************
+	 * Deposit 
+	********************/
+	
+	public UserDeposit getDeposit(String userId, String depositId) {
+		UserDeposit deposit;
+		String resp = almaGet("users/" + userId + "/deposits/" + depositId);
+		
+    	deposit = JAXB.unmarshal(new StringReader(resp), UserDeposit.class);
+    	return deposit;
+	}
+	
+	public ArrayList<String> getDepositFiles(UserDeposit deposit) {
+		String resp = almaGet("bibs/" + deposit.getMmsId() + "/representations/" +
+						deposit.getRepId() + "/files");
+    	RepresentationFiles repFiles = 
+    			JAXB.unmarshal(new StringReader(resp), RepresentationFiles.class);
+    	
 		ArrayList<String> files = new ArrayList<String>();
 		String filename = "";
-		for (String key : keys) {
-			String[] parts = key.split("/");
+		for (RepresentationFile file : repFiles.getRepresentationFile()) {
+			String[] parts = file.getPath().split("/");
 			filename = parts[parts.length-1];
 			files.add(filename);
 		}
-		return new Deposit(files);
+		return files;
 	}
 	
-	public String createRepresentation(String mmsId, String originatingRecord) {
+	public UserDeposit createDeposit(String depositProfileId, String mmsId, 
+			String repId, String title, boolean draft, String userId) {
+		UserDeposit deposit = new UserDeposit();
+		deposit.setDepositProfile(depositProfileId);
+		deposit.setMmsId(mmsId);
+		deposit.setRepId(repId);
+		deposit.setTitle(title);
+		
+		StringWriter sw = new StringWriter();
+		JAXB.marshal(deposit, sw);
+		
+		Map<String, String> params = new HashMap<String, String>();
+		if (draft) params.put("draft", "true");
+		String resp = almaPost("users/" + userId + "/deposits",	sw.toString(), params);
+    	deposit = JAXB.unmarshal(new StringReader(resp), UserDeposit.class);
+    	return deposit;
+	}
+	
+	public void submitDeposit(String userId, String depositId) {
+		
+		// For some reason need to submit the deposit.
+		// TODO: Remove when bug is fixed
+		String resp = almaGet("users/" + userId + "/deposits/" + depositId);
+    	UserDeposit deposit = JAXB.unmarshal(new StringReader(resp), UserDeposit.class);
+    	deposit.setNotes(null);
+		StringWriter sw = new StringWriter();
+		JAXB.marshal(deposit, sw);
+    	
+    	Map<String, String> params = new HashMap<String, String>();
+		params.put("op", "submit");
+		resp = almaPost("users/" + userId + "/deposits/" + depositId, sw.toString(), params);
+	}
+	
+	public void withdrawDeposit(String userId, String depositId) {
+		// For some reason need to submit the deposit.
+		// TODO: Remove when bug is fixed
+		String resp = almaGet("users/" + userId + "/deposits/" + depositId);
+    	UserDeposit deposit = JAXB.unmarshal(new StringReader(resp), UserDeposit.class);
+    	deposit.setNotes(null);
+		StringWriter sw = new StringWriter();
+		JAXB.marshal(deposit, sw);
+    	
+    	Map<String, String> params = new HashMap<String, String>();
+		params.put("op", "withdraw");
+		resp = almaPost("users/" + userId + "/deposits/" + depositId, sw.toString(), params);		
+	}
+	
+	public DepositProfile getDepositProfile(String depositProfileId) {
+		DepositProfile depositProfile = new DepositProfile();
+		String resp = almaGet("conf/deposit-profiles/" + depositProfileId);
+    	depositProfile = JAXB.unmarshal(new StringReader(resp), DepositProfile.class);
+    	return depositProfile;
+	}
+	
+	public DepositProfiles getDepositProfiles() {
+		
+		DepositProfiles depositProfiles = new DepositProfiles();
+		String resp = almaGet("conf/deposit-profiles");
+		
+		depositProfiles = JAXB.unmarshal(new StringReader(resp), DepositProfiles.class);
+		
+		return depositProfiles;
+		
+	}
+	
+	/*******************
+	 * Representation
+	********************/
+	
+	public Representation createRepresentation(String mmsId, String libraryId) {
 		
 		Representation rep = new Representation();
+		rep.setIsRemote(false);
 		Representation.Library library = new Representation.Library();
-		library.setValue("MAIN");
+		library.setValue(libraryId);
 		Representation.UsageType usageType = new Representation.UsageType();
 		usageType.setValue("PRESERVATION_MASTER");
-		Representation.Repository repository = new Representation.Repository();
-		repository.setValue("AWS");
 		rep.setLibrary(library);
 		rep.setUsageType(usageType);
-		rep.setRepository(repository);
-
-		// Temporary for remote rep purposes
-		rep.setLinkingParameter1(mmsId);
-		rep.setIsRemote(true);
-		rep.setOriginatingRecordId(originatingRecord);
 		
 		StringWriter sw = new StringWriter();
 		JAXB.marshal(rep, sw);
 		
-		String resp = AlmaRestUtil.post(
-				_properties.getAlmaUrl(), 
-				"bibs/" + mmsId + "/representations",
-				_authCredentials.getPassword(), 
-				null,
-				sw.toString(), 
-				true
-			);
+		String resp = almaPost("bibs/" + mmsId + "/representations",
+				sw.toString());
 
     	rep = JAXB.unmarshal(new StringReader(resp), Representation.class);
-    	return rep.getId();
+    	return rep;
 	}
 	
+	/*******************
+	 * File 
+	********************/
 	
-	public void deleteFile(String depositId, String fileId) {
-		Bib bib = getBib(depositId);
-		SwordUtilities.deleteFileFromS3(bib.getOrigId() + "/" + fileId);
-	}
-	
-	@SuppressWarnings("unchecked")
-	public List<DepositProfile> getDepositProfiles() {
-		
-    	HashMap<String, String> params = new HashMap<String, String>();
-    	params.put("type", "REPOSITORY");
-    	params.put("ie_type", "DIGITAL");
-    	
-		String resp = AlmaRestUtil.get(
-				_properties.getAlmaUrl(),
-    			"conf/md-import-profiles",
-    			_authCredentials.getPassword(),
-    			params);
-		
-		List<DepositProfile> list = new ArrayList<DepositProfile>();
+	public void deleteFile(String userId, String depositId, String fileName) {
 
-		try {
-			Gson gson = new Gson();
-			Type obj = new TypeToken<Map<String, Object>>(){}.getType();
-			Map<String, Object> map = gson.fromJson(resp, obj);
-			ArrayList<Object> i = (ArrayList<Object>) map.get("import_profile");
-			for (Object p : i) {
-				Map<String, Object> profile = (Map<String, Object>) p;
-				Map<String, Object> digitalDetails = 
-						(Map<String, Object>) profile.get("digital_details");
-				Map<String, Object> collection = 
-						(Map<String, Object>) digitalDetails.get("collection_assignment");
-				DepositProfile dp = new DepositProfile(
-						(String) profile.get("id"), 
-						(String) profile.get("name"), 
-						(String) collection.get("desc"),
-						(String) collection.get("value")
-				);
-				list.add(dp);
-			}
-		} catch (Exception e) {
-			log.error(e.getMessage(), e);
+		String resp = almaGet("users/" + userId + "/deposits/" + depositId);
+		
+    	UserDeposit deposit = JAXB.unmarshal(new StringReader(resp), UserDeposit.class);
+    	
+    	// TODO: TEMP GET REP
+		resp = almaGet("bibs/" + deposit.getMmsId() + "/representations");
+    	Representations reps = JAXB.unmarshal(new StringReader(resp), Representations.class);
+    	
+    	String repId = reps.getRepresentation().get(0).getId();
+    	
+    	// TODO: Remove
+    	deposit.setRepId(repId);
+    	
+    	// Get files
+		resp = almaGet("bibs/" + deposit.getMmsId() + "/representations/" +
+						repId + "/files");
+    	RepresentationFiles repFiles = 
+    			JAXB.unmarshal(new StringReader(resp), RepresentationFiles.class);
+    	
+		String filename = "";
+		String fileId = null;
+		for (RepresentationFile file : repFiles.getRepresentationFile()) {
+			String[] parts = file.getPath().split("/");
+			filename = parts[parts.length-1];
+			if (filename.equals(fileName))
+				fileId = file.getPid();
 		}
 		
-		return list;
+		// Delete file
+		almaDelete("bibs/" + deposit.getMmsId() + "/representations/" +
+						deposit.getRepId() + "/files/" +
+						fileId);
+
 	}
+	
+	public void addFileToRepresentation(String mmsId, String repId, String path) {
+		RepresentationFile repFile = new RepresentationFile();
+		repFile.setPath(path);
+		
+		StringWriter sw = new StringWriter();
+		JAXB.marshal(repFile, sw);
+		
+		almaPost("bibs/"+ mmsId + "/representations/" + repId + "/files",
+				sw.toString());
+	}
+	
+	
+	/*******************
+	 * User
+	********************/
 	
 	public Boolean testUser() {
 		try {
-	    	AlmaRestUtil.get(
-	    			_properties.getAlmaUrl(), 
-	    			"users/operation/test", 
-	    			_authCredentials.getPassword());
+	    	almaGet("users/operation/test");
 	    	return true;
 		} catch (BadRequestException e) {
 			return false;
@@ -304,12 +376,7 @@ public class AlmaRepository {
     		
 			Map<String, String> params = new HashMap<String, String>();
     		params.put("view", "brief");
-	    	String resp = AlmaRestUtil.get(
-	    			_properties.getAlmaUrl(), 
-	    			"users/" + _authCredentials.getOnBehalfOf(), 
-	    			_authCredentials.getPassword(), 
-	    			params,
-	    			true);	
+	    	String resp = almaGet("users/" + _authCredentials.getOnBehalfOf(), params);
 
 	    	user = JAXB.unmarshal(new StringReader(resp), User.class);
 	    	
@@ -328,40 +395,64 @@ public class AlmaRepository {
 	}
 	
 	/*******************
-	 * Inner Classes 
+	 * Private functions
 	********************/
 	
-	class DepositProfile {
-		private String _id;
-		private String _collectionName;
-		private String _collectionId;
-		private String _name;
-		
-		public DepositProfile(String id, String name, 
-				String collectionName, String collectionId) {
-			_id = id;
-			_name = name;
-			_collectionId = collectionId;
-			_collectionName = collectionName;
-		}
-		
-		public String getId() {
-			return _id;
-		}
-		
-		public String getCollectionId() {
-			return _collectionId;
-		}
-		
-		public String getCollectionName() {
-			return _collectionName;
-		}
-		
-		public String getName() {
-			return _name;
-		}
+	private String almaGet(String path, Map<String, String> params) {
+		return AlmaRestUtil.get(
+    			_properties.getAlmaUrl(), 
+    			path, 
+    			_authCredentials.getPassword(), 
+    			params);	
 	}
 	
+	private String almaGet(String path) {
+		return almaGet(path, null);
+	}
+	
+	private String almaPost(String path, String data,  Map<String, String> params) {
+		return AlmaRestUtil.post(
+				_properties.getAlmaUrl(), 
+				path,
+				_authCredentials.getPassword(),
+				params,
+				data);
+	}
+	
+	private String almaPost(String path, String data) {
+		return almaPost(path, data, null);
+	}
+	
+	private String almaPut(String path, String data,  Map<String, String> params) {
+		return AlmaRestUtil.put(
+				_properties.getAlmaUrl(), 
+				path,
+				_authCredentials.getPassword(),
+				params,
+				data);
+	}
+	
+	private String almaPut(String path, String data) {
+		return almaPut(path, data, null);
+	}
+	
+	private void almaDelete(String path, Map<String, String> params) {
+		// Handle params if needed
+		AlmaRestUtil.delete(
+				_properties.getAlmaUrl(), 
+				path, 
+				_authCredentials.getPassword()
+			);
+	}
+	
+	private void almaDelete(String path) {
+		almaDelete(path, null);
+	}
+	
+	/*******************
+	 * Inner Classes 
+	********************/
+
 	class DCEntity {
 		private String _name;
 		private String _value;
@@ -384,13 +475,9 @@ public class AlmaRepository {
 		private Map<String, List<String>> _dc;
 		private String _mmsId;
 		
-		// TODO: Remove this
-		private String _origId;
-		
-		public Bib(String mmsId, Map<String, List<String>> dc, String origId) {
+		public Bib(String mmsId, Map<String, List<String>> dc) {
 			_mmsId = mmsId;
 			_dc = dc;
-			_origId = origId;
 		}
 		
 		public String getMmsId() {
@@ -401,48 +488,5 @@ public class AlmaRepository {
 			return _dc;
 		}
 		
-		public String getOrigId() {
-			return _origId;
-		}
 	}
-	
-	class Deposit {
-		private ArrayList<String> _files;
-		
-		public Deposit(ArrayList<String> files) {
-			_files = files;
-		}
-		
-		public ArrayList<String> getFiles() {
-			return _files;
-		}
-	}
-	
-	class File {
-		private String _url;
-		private String _filename;
-		
-		public File(String url, String filename) {
-			_url = url;
-			_filename = filename;
-		}
-		
-		public String getUrl() {
-			return _url;
-		}
-		
-		public String getFilename() {
-			return _filename;
-		}
-		
-		public void setUrl(String url) {
-			_url = url;
-		}
-		
-		public void setFilename(String filename) {
-			_filename = filename;
-		}
-		
-	}
-
 }
